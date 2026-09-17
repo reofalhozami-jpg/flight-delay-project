@@ -1,0 +1,21 @@
+CREATE TABLE flights (
+    id SERIAL PRIMARY KEY,
+    fl_date DATE,
+    carrier VARCHAR(10),
+    flight_num INTEGER,
+    origin VARCHAR(10),
+    origin_city VARCHAR(100),
+    dest VARCHAR(10),
+    dest_city VARCHAR(100),
+    crs_dep_time INTEGER,
+    dep_time INTEGER,
+    dep_delay NUMERIC,
+    crs_arr_time INTEGER,
+    arr_time INTEGER,
+    arr_delay NUMERIC,
+    arr_del15 NUMERIC,
+    cancelled NUMERIC,
+    cancellation_code VARCHAR(5),
+    crs_elapsed_time NUMERIC,
+    distance NUMERIC
+);
