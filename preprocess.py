@@ -7,7 +7,7 @@ engine = create_engine('postgresql://postgres:mypassword@localhost:5555/postgres
 # Load the raw data from the flights table
 df = pd.read_sql('SELECT * FROM flights', engine)
 
-# --- Preprocessing steps ---
+# --- Preprocessing  ---
 
 # 1. Cancelled flights have no delay info - that's expected, not an error.
 #    For modeling, we'll focus on flights that actually flew.
