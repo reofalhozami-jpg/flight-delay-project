@@ -26,19 +26,107 @@ model_columns = X.columns
 
 # --- The web page ---
 PAGE = """
-<h1>Flight Delay Predictor</h1>
-<form method="post">
-  Carrier:
-  <select name="carrier">
-    {% for c in carriers %}<option value="{{c}}">{{c}}</option>{% endfor %}
-  </select><br><br>
-  Day of week (0=Monday, 6=Sunday): <input name="day_of_week" value="0"><br><br>
-  Month: <input name="month" value="1"><br><br>
-  Distance (miles): <input name="distance" value="500"><br><br>
-  Scheduled departure time (e.g. 1430): <input name="dep_time" value="1200"><br><br>
-  <button type="submit">Predict</button>
-</form>
-{% if result %}<h2>Prediction: {{ result }}</h2>{% endif %}
+<!DOCTYPE html>
+<html>
+<head>
+<title>Flight Delay Predictor</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f8;
+    display: flex;
+    justify-content: center;
+    padding-top: 50px;
+  }
+  .card {
+    background: white;
+    padding: 30px 40px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    width: 350px;
+  }
+  h1 {
+    font-size: 22px;
+    color: #222;
+    margin-bottom: 20px;
+  }
+  label {
+    display: block;
+    margin-top: 12px;
+    font-size: 14px;
+    color: #444;
+  }
+  select, input {
+    width: 100%;
+    padding: 8px;
+    margin-top: 4px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    box-sizing: border-box;
+  }
+  button {
+    margin-top: 20px;
+    width: 100%;
+    padding: 10px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:hover {
+    background: #1e4fc4;
+  }
+  .result {
+    margin-top: 20px;
+    padding: 12px;
+    border-radius: 6px;
+    text-align: center;
+    font-weight: bold;
+  }
+  .delayed {
+    background: #fde2e2;
+    color: #b91c1c;
+  }
+  .ontime {
+    background: #dcfce7;
+    color: #15803d;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Flight Delay Predictor</h1>
+  <form method="post">
+    <label>Carrier</label>
+    <select name="carrier">
+      {% for c in carriers %}<option value="{{c}}">{{c}}</option>{% endfor %}
+    </select>
+
+    <label>Day of week (0=Monday, 6=Sunday)</label>
+    <input name="day_of_week" value="0">
+
+    <label>Month</label>
+    <input name="month" value="1">
+
+    <label>Distance (miles)</label>
+    <input name="distance" value="500">
+
+    <label>Scheduled departure time (e.g. 1430)</label>
+    <input name="dep_time" value="1200">
+
+    <button type="submit">Predict</button>
+  </form>
+
+  {% if result %}
+    <div class="result {{ 'delayed' if result == 'Delayed' else 'ontime' }}">
+      Prediction: {{ result }}
+    </div>
+  {% endif %}
+</div>
+</body>
+</html>
 """
 
 @app.route("/", methods=["GET", "POST"])
