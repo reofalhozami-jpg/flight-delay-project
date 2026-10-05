@@ -54,6 +54,39 @@ for name, model in models.items():
 
 print(f"\nAlways guessing 'On Time' would score: {always_on_time:.2%}")
 
+# --- Cancellation model, using the raw flights table ---
+df_cancel = pd.read_sql('SELECT * FROM flights', engine)
+df_cancel['FL_DATE'] = pd.to_datetime(df_cancel['FL_DATE'])
+df_cancel['day_of_week'] = df_cancel['FL_DATE'].dt.dayofweek
+df_cancel['month'] = df_cancel['FL_DATE'].dt.month
+
+cancel_features = ['OP_UNIQUE_CARRIER', 'ORIGIN', 'day_of_week', 'month', 'DISTANCE', 'CRS_DEP_TIME']
+Xc = pd.get_dummies(df_cancel[cancel_features], columns=['OP_UNIQUE_CARRIER', 'ORIGIN'])
+yc = df_cancel['CANCELLED']
+
+Xc_train, Xc_test, yc_train, yc_test = train_test_split(Xc, yc, test_size=0.2, random_state=42)
+
+cancel_model = RandomForestClassifier(n_estimators=100, max_depth=10, class_weight='balanced', random_state=42)
+cancel_model.fit(Xc_train, yc_train)
+cancel_preds = cancel_model.predict(Xc_test)
+
+cancel_row = {
+    'run_time': datetime.now(),
+    'model': 'Cancellation (Random Forest, balanced)',
+    'accuracy': accuracy_score(yc_test, cancel_preds),
+    'precision': precision_score(yc_test, cancel_preds, zero_division=0),
+    'recall': recall_score(yc_test, cancel_preds, zero_division=0),
+    'f1': f1_score(yc_test, cancel_preds, zero_division=0),
+    'always_on_time_accuracy': 1 - yc_test.mean(),
+}
+log_rows.append(cancel_row)
+
+print('Cancellation (Random Forest, balanced)')
+print(f"  accuracy:  {cancel_row['accuracy']:.2%}")
+print(f"  precision: {cancel_row['precision']:.2%}")
+print(f"  recall:    {cancel_row['recall']:.2%}")
+print(f"  f1:        {cancel_row['f1']:.2%}")
+
 # Log the results into their own table
 try:
     pd.DataFrame(log_rows).to_sql('model_results', engine, if_exists='append', index=False)
