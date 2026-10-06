@@ -1,0 +1,126 @@
+{
+  "name": "n8n_flight_chatbot.json",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        0
+      ],
+      "id": "dc31a792-4530-4064-b9cb-886edeba7cf0",
+      "name": "When chat message received",
+      "webhookId": "9de7b9f0-2472-40e6-b861-ed75c109126b"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are a data assistant for a flight database. Answer questions about US flights in January 2024 by running SQL queries with the Postgres tool.\n\nThe tables are:\n- flights: the raw data, including cancelled flights\n- flights_processed: cleaned data with cancelled flights removed\n\nColumn names are in UPPER CASE and must be written in double quotes in SQL, like \"OP_UNIQUE_CARRIER\". The main columns are FL_DATE, OP_UNIQUE_CARRIER (airline code), ORIGIN, DEST, DEP_DELAY, ARR_DELAY, ARR_DEL15 (1 if the flight arrived 15+ minutes late), CANCELLED (1 if cancelled), and DISTANCE.\n\nOnly use SELECT queries. If a question can't be answered from this data, say so instead of guessing.\n\nNever state a number unless it came from a query result. If you are unsure, run another query.\n\nThere are no other tables, so do not join to tables like airlines. The model_results and flight_predictions tables also exist. Airline names are not in the database, only the two-letter codes, so give the code and say which airline it is from your own knowledge.\n\nWrite simple SQL only: SELECT, WHERE, GROUP BY, ORDER BY, LIMIT. Do not use GROUPING SETS, window functions, or CTEs."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "6b5cda7e-c553-4ac3-85aa-520ec0bcc514",
+      "name": "AI Agent",
+      "retryOnFail": true,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        128,
+        192
+      ],
+      "id": "516def64-82de-4a4b-a092-b54aa583f2de",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "zpeIqCezKbW1pUGE",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $fromAI('query', 'The SQL SELECT query to run', 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.7,
+      "position": [
+        368,
+        208
+      ],
+      "id": "4fbc579d-fc8d-46d4-b10e-a69305875309",
+      "name": "Execute a SQL query in Postgres",
+      "credentials": {
+        "postgres": {
+          "id": "zMjd183Ki1N0Z2BY",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query in Postgres": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f9cfe47e-8f7d-49d2-ae71-48d843a0d019",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f5a1dbd4bea5a18abf7b4443322cefa3fe78295f8defab953d161c25d1fa3fae"
+  },
+  "nodeGroups": [],
+  "id": "qOgHf2msehH3syYm",
+  "tags": []
+}
