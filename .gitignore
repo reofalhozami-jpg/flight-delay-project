@@ -3,3 +3,4 @@ T_ONTIME_REPORTING.csv
 __pycache__/
 .venv/
 .env
+.adk/
