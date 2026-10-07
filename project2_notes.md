@@ -14,3 +14,14 @@ database query. Not much code needed.
 Google's toolkit for building AI agents in Python. I write instructions for
 the agent and give it a function that runs SQL on the database. It decides
 when to call that function to answer a question.
+
+## n8n vs ADK
+
+I asked both chatbots the same questions and the answers matched. The one
+difference was "which airport is the worst", where they used different
+minimum flight counts for small airports, so each picked a different one.
+I checked both in the database and both were right.
+
+ADK got an airport name wrong, so I check names but trust the numbers.
+
+n8n was faster to set up. ADK is more code, but gives me more control.
