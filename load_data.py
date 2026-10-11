@@ -1,3 +1,4 @@
+# Loads the raw flight CSV into the flights table in PostgreSQL
 import pandas as pd
 from sqlalchemy import create_engine
 

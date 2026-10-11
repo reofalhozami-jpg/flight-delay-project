@@ -41,7 +41,13 @@ cancel_columns = Xc.columns
 
 airport_list = sorted(df_c['ORIGIN'].unique())
 
-# --- Data for the charts and the table (read from the database) ---
+# --- Summary numbers for the top cards ---
+total_flights = f"{len(df_c):,}"
+delay_rate = round(df['ARR_DEL15'].mean() * 100, 1)
+cancel_rate = round(df_c['CANCELLED'].mean() * 100, 1)
+carrier_count = df_c['OP_UNIQUE_CARRIER'].nunique()
+
+# --- Data for the charts (read from the database) ---
 delay_by_airline = pd.read_sql(
     'SELECT "OP_UNIQUE_CARRIER" AS carrier, AVG("ARR_DEL15") * 100 AS rate '
     'FROM flights_processed GROUP BY "OP_UNIQUE_CARRIER" ORDER BY rate DESC', engine)
@@ -50,17 +56,10 @@ cancel_by_airport = pd.read_sql(
     'SELECT "ORIGIN" AS airport, COUNT(*) AS n FROM flights '
     'WHERE "CANCELLED" = 1 GROUP BY "ORIGIN" ORDER BY n DESC LIMIT 10', engine)
 
-model_table = pd.read_sql(
-    'SELECT DISTINCT ON (model) model, accuracy, "precision", recall, f1 '
-    'FROM model_results ORDER BY model, run_time DESC', engine)
-for col in ['accuracy', 'precision', 'recall', 'f1']:
-    model_table[col] = (model_table[col] * 100).round(2)
-
 airline_labels = delay_by_airline['carrier'].tolist()
 airline_values = delay_by_airline['rate'].round(2).tolist()
 airport_labels = cancel_by_airport['airport'].tolist()
 airport_values = cancel_by_airport['n'].tolist()
-model_rows = model_table.to_dict('records')
 
 
 def make_row(columns, values, categories):
@@ -72,9 +71,11 @@ def make_row(columns, values, categories):
     return row.reindex(columns=columns, fill_value=0)
 
 
-def chance_of_yes(model, row):
+def chance_of_yes(model, row, base_rate):
     classes = list(model.classes_)
-    return model.predict_proba(row)[0][classes.index(1)] * 100
+    p = min(model.predict_proba(row)[0][classes.index(1)], 0.999)
+    odds = (p / (1 - p)) * (base_rate / (1 - base_rate))
+    return odds / (1 + odds) * 100
 
 
 # --- The web page ---
@@ -82,107 +83,148 @@ PAGE = """
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flight Delay Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css" rel="stylesheet" />
 <style>
-  body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 30px; }
-  h1 { text-align: center; color: #222; margin-bottom: 5px; }
-  .sub { text-align: center; color: #666; margin-bottom: 30px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1100px; margin: 0 auto; }
-  .card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-  .wide { grid-column: 1 / 3; }
-  h2 { font-size: 18px; color: #222; margin-top: 0; }
-  label { display: block; margin-top: 12px; font-size: 14px; color: #444; }
-  select, input { width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
-  button { margin-top: 20px; width: 100%; padding: 10px; background: #2563eb; color: white; border: none; border-radius: 5px; font-size: 15px; cursor: pointer; }
-  button:hover { background: #1e4fc4; }
-  .result { margin-top: 15px; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; }
-  .bad { background: #fde2e2; color: #b91c1c; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f1f5f9; margin: 0; color: #0f172a; }
+
+  .topbar { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: white; padding: 28px 40px; }
+  .topbar h1 { margin: 0; font-size: 26px; font-weight: 600; }
+  .topbar p { margin: 6px 0 0 0; opacity: 0.85; font-size: 14px; }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; max-width: 1500px; margin: 0 auto; padding: 24px 40px 40px 40px; }
+  .main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .stat { background: white; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(15,23,42,0.08); border-left: 4px solid #2563eb; }
+  .stat .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+  .stat.red { border-left-color: #dc2626; }
+  .stat.amber { border-left-color: #d97706; }
+  .stat.green { border-left-color: #16a34a; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(15,23,42,0.08); }
+  h2 { font-size: 16px; font-weight: 600; margin: 0 0 16px 0; }
+  .chart-box { position: relative; height: 280px; }
+
+  label { display: block; margin-top: 12px; font-size: 13px; color: #475569; }
+  select, input { width: 100%; padding: 9px 10px; margin-top: 4px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; background: white; }
+  select:focus, input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  button.predict { margin-top: 20px; width: 100%; padding: 11px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button.predict:hover { background: #1d4ed8; }
+
+  .result { margin-top: 14px; padding: 12px; border-radius: 8px; text-align: center; font-weight: 600; }
+  .bad { background: #fee2e2; color: #b91c1c; }
   .good { background: #dcfce7; color: #15803d; }
   .error { background: #fef3c7; color: #92400e; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
-  th { background: #f4f6f8; }
-  .note { font-size: 13px; color: #666; margin-top: 10px; }
+  .note { font-size: 12px; color: #64748b; margin-top: 12px; line-height: 1.5; }
+
+  .chat-panel { position: sticky; top: 24px; height: calc(100vh - 48px); display: flex; flex-direction: column; background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(15,23,42,0.08); overflow: hidden; }
+  .chat-title { padding: 18px 22px; border-bottom: 1px solid #e2e8f0; font-weight: 600; font-size: 16px; }
+  .chat-title span { display: block; font-weight: 400; font-size: 12px; color: #64748b; margin-top: 2px; }
+  #n8n-chat { flex: 1; min-height: 0; --chat--color-primary: #2563eb; --chat--color-primary-shade-50: #1d4ed8; --chat--color-primary-shade-100: #1e40af; --chat--border-radius: 10px; --chat--spacing: 0.9rem; }
+  #n8n-chat .chat-layout { height: 100%; }
+  #n8n-chat .chat-header { display: none; }
+
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; padding: 20px; }
+    .chat-panel { position: static; height: 600px; }
+    .stats { grid-template-columns: 1fr 1fr; }
+    .row { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-  <h1>Flight Delay Dashboard</h1>
-  <div class="sub">US flights, January 2024</div>
 
-  <div class="grid">
+  <div class="topbar">
+    <h1>Flight Delay Dashboard</h1>
+    <p>US domestic flights, January 2024</p>
+  </div>
 
-    <div class="card">
-      <h2>Predict a flight</h2>
-      <form method="post">
-        <label>Carrier</label>
-        <select name="carrier">
-          {% for c in carriers %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-        </select>
+  <div class="layout">
 
-        <label>Origin airport</label>
-        <select name="origin">
-          {% for a in airports %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
-        </select>
+    <div class="main">
 
-        <label>Day of week (0=Monday, 6=Sunday)</label>
-        <input name="day_of_week" value="0">
+      <div class="stats">
+        <div class="stat"><div class="label">Total flights</div><div class="value">{{ total_flights }}</div></div>
+        <div class="stat amber"><div class="label">Delay rate</div><div class="value">{{ delay_rate }}%</div></div>
+        <div class="stat red"><div class="label">Cancellation rate</div><div class="value">{{ cancel_rate }}%</div></div>
+        <div class="stat green"><div class="label">Airlines</div><div class="value">{{ carrier_count }}</div></div>
+      </div>
 
-        <label>Month</label>
-        <input name="month" value="1">
+      <div class="row">
+        <div class="card">
+          <h2>Predict a flight</h2>
+          <form method="post">
+            <div class="form-grid">
+              <div>
+                <label>Carrier</label>
+                <select name="carrier">
+                  {% for c in carriers %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Origin airport</label>
+                <select name="origin">
+                  {% for a in airports %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Day of week (0=Mon, 6=Sun)</label>
+                <input name="day_of_week" value="0">
+              </div>
+              <div>
+                <label>Month</label>
+                <input name="month" value="1">
+              </div>
+              <div>
+                <label>Distance (miles)</label>
+                <input name="distance" value="500">
+              </div>
+              <div>
+                <label>Departure time (e.g. 1430)</label>
+                <input name="dep_time" value="1200">
+              </div>
+            </div>
+            <button class="predict" type="submit">Predict</button>
+          </form>
 
-        <label>Distance (miles)</label>
-        <input name="distance" value="500">
+          {% if error %}
+            <div class="result error">{{ error }}</div>
+          {% endif %}
 
-        <label>Scheduled departure time (e.g. 1430)</label>
-        <input name="dep_time" value="1200">
-
-        <button type="submit">Predict</button>
-      </form>
-
-      {% if error %}
-        <div class="result error">{{ error }}</div>
-      {% endif %}
-
-      {% if result %}
-        <div class="result {{ 'bad' if result.delayed else 'good' }}">
-          {{ 'Delayed' if result.delayed else 'On Time' }} &mdash; delay score {{ result.delay_pct }}%
+          {% if result %}
+            <div class="result {{ 'bad' if result.delayed else 'good' }}">
+              {{ 'Higher risk of delay' if result.delayed else 'Normal delay risk' }} &mdash; chance of delay {{ result.delay_pct }}%
+            </div>
+            <div class="result {{ 'bad' if result.cancelled else 'good' }}">
+              {{ 'Higher risk of cancellation' if result.cancelled else 'Normal cancellation risk' }} &mdash; chance of cancellation {{ result.cancel_pct }}%
+            </div>
+          {% endif %}
         </div>
-        <div class="result {{ 'bad' if result.cancelled else 'good' }}">
-          {{ 'Cancelled' if result.cancelled else 'Not Cancelled' }} &mdash; cancellation score {{ result.cancel_pct }}%
+
+        <div class="card">
+          <h2>Delay rate by airline (%)</h2>
+          <div class="chart-box"><canvas id="airlineChart"></canvas></div>
         </div>
-        <div class="note">
-          These scores come from models set up to catch more problem flights, so they run higher than the real
-          rates (about 24% of flights are delayed and about 4% are cancelled).
-        </div>
-      {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Top 10 airports by cancelled flights</h2>
+        <div class="chart-box"><canvas id="airportChart"></canvas></div>
+      </div>
+
     </div>
 
-    <div class="card">
-      <h2>Delay rate by airline (%)</h2>
-      <canvas id="airlineChart"></canvas>
-    </div>
-
-    <div class="card wide">
-      <h2>Top 10 airports by cancelled flights</h2>
-      <canvas id="airportChart" height="90"></canvas>
-    </div>
-
-    <div class="card wide">
-      <h2>Model comparison (%)</h2>
-      <table>
-        <tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th></tr>
-        {% for m in models %}
-        <tr>
-          <td>{{ m['model'] }}</td>
-          <td>{{ m['accuracy'] }}</td>
-          <td>{{ m['precision'] }}</td>
-          <td>{{ m['recall'] }}</td>
-          <td>{{ m['f1'] }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-      <div class="note">The form uses the balanced Random Forest for delays and the balanced Random Forest for cancellations.</div>
+    <div class="chat-panel">
+      <div class="chat-title">Ask about the flight data<span>Answers come straight from the database</span></div>
+      <div id="n8n-chat"></div>
     </div>
 
   </div>
@@ -192,18 +234,38 @@ PAGE = """
     type: 'bar',
     data: {
       labels: {{ airline_labels | tojson }},
-      datasets: [{ label: 'Delay rate (%)', data: {{ airline_values | tojson }}, backgroundColor: '#2563eb' }]
+      datasets: [{ label: 'Delay rate (%)', data: {{ airline_values | tojson }}, backgroundColor: '#2563eb', borderRadius: 4 }]
     },
-    options: { plugins: { legend: { display: false } } }
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false } } }
   });
 
   new Chart(document.getElementById('airportChart'), {
     type: 'bar',
     data: {
       labels: {{ airport_labels | tojson }},
-      datasets: [{ label: 'Cancelled flights', data: {{ airport_values | tojson }}, backgroundColor: '#dc2626' }]
+      datasets: [{ label: 'Cancelled flights', data: {{ airport_values | tojson }}, backgroundColor: '#dc2626', borderRadius: 4 }]
     },
-    options: { plugins: { legend: { display: false } } }
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+</script>
+
+<script type="module">
+  import { createChat } from 'https://cdn.jsdelivr.net/npm/@n8n/chat/dist/chat.bundle.es.js';
+  createChat({
+    webhookUrl: 'http://localhost:5678/webhook/9de7b9f0-2472-40e6-b861-ed75c109126b/chat',
+    target: '#n8n-chat',
+    mode: 'fullscreen',
+    showWelcomeScreen: false,
+    initialMessages: ['Ask me anything about the January 2024 flight data.'],
+    i18n: {
+      en: {
+        title: '',
+        subtitle: '',
+        footer: '',
+        getStarted: 'New conversation',
+        inputPlaceholder: 'Ask a question about the flights...'
+      }
+    }
   });
 </script>
 </body>
@@ -237,9 +299,9 @@ def home():
 
             result = {
                 'delayed': delay_model.predict(delay_row)[0] == 1,
-                'delay_pct': round(chance_of_yes(delay_model, delay_row), 1),
+                'delay_pct': round(chance_of_yes(delay_model, delay_row, delay_rate / 100), 1),
                 'cancelled': cancel_model.predict(cancel_row)[0] == 1,
-                'cancel_pct': round(chance_of_yes(cancel_model, cancel_row), 1),
+                'cancel_pct': round(chance_of_yes(cancel_model, cancel_row, cancel_rate / 100), 1),
             }
         except Exception as e:
             error = f"Error: {e}"
@@ -254,7 +316,10 @@ def home():
         airline_values=airline_values,
         airport_labels=airport_labels,
         airport_values=airport_values,
-        models=model_rows,
+        total_flights=total_flights,
+        delay_rate=delay_rate,
+        cancel_rate=cancel_rate,
+        carrier_count=carrier_count,
     )
 
 

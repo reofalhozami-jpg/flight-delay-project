@@ -1,7 +1,13 @@
+# Reads the flights table
+# Removes cancelled flights
+# Adds day_of_week and month columns
+# Drops columns we don't need
+# Saves the result as flights_processed
+
+# specifically for delay prediction
 import pandas as pd
 from sqlalchemy import create_engine
-# specifically for delay prediction
-# Connect to the database
+
 engine = create_engine('postgresql://postgres:mypassword@localhost:5555/postgres')
 
 # Load the raw data from the flights table
@@ -9,8 +15,8 @@ df = pd.read_sql('SELECT * FROM flights', engine)
 
 # --- Preprocessing  ---
 
-# 1. Cancelled flights have no delay info - that's expected, not an error.
-#    For modeling, we'll focus on flights that actually flew.
+# 1. Cancelled flights have no delay info 
+# For modeling we will focus on flights that actually flew.
 df_clean = df[df['CANCELLED'] == 0].copy()
 
 # 2. Convert fl_date to a real date object instead of a string
@@ -18,7 +24,7 @@ df_clean['FL_DATE'] = pd.to_datetime(df_clean['FL_DATE'])
 df_clean['day_of_week'] = df_clean['FL_DATE'].dt.dayofweek # 0=Monday
 df_clean['month'] = df_clean['FL_DATE'].dt.month #for later
 
-# 3. Drop columns that wont help predict delays, wewill use 
+# 3. Drop columns that wont help predict delays
 df_clean = df_clean.drop(columns=['ORIGIN_CITY_NAME', 'DEST_CITY_NAME', 'CANCELLATION_CODE'])
 
 # 4. Fill any remaining small gaps in numeric columns with 0
