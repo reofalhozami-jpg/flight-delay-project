@@ -179,10 +179,7 @@ PAGE = """
                 <label>Day of week (0=Mon, 6=Sun)</label>
                 <input name="day_of_week" value="0">
               </div>
-              <div>
-                <label>Month</label>
-                <input name="month" value="1">
-              </div>
+              
               <div>
                 <label>Distance (miles)</label>
                 <input name="distance" value="500">
@@ -280,7 +277,7 @@ def home():
     if request.method == "POST":
         try:
             day = int(request.form['day_of_week'])
-            month = int(request.form['month'])
+            month = 1
             distance = float(request.form['distance'])
             dep_time = int(request.form['dep_time'])
             carrier = request.form['carrier']
