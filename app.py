@@ -6,7 +6,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
-engine = create_engine('postgresql://postgres:mypassword@localhost:5555/postgres')
+import os
+engine = create_engine(os.environ.get('DATABASE_URL', 'postgresql://postgres:mypassword@localhost:5555/postgres'))
 
 # --- Delay model (trained once, when the app starts) ---
 df = pd.read_sql('SELECT * FROM flights_processed', engine)
@@ -321,4 +322,4 @@ def home():
 
 
 if __name__ == "__main__":
-    app.run(debug=False)
+        app.run(host='0.0.0.0', port=5000, debug=False)
