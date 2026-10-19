@@ -1,7 +1,8 @@
+import os
 from google.adk.agents import Agent
 from sqlalchemy import create_engine, text
 
-engine = create_engine('postgresql+psycopg://postgres:mypassword@localhost:5555/postgres')
+engine = create_engine(os.environ.get('DATABASE_URL', 'postgresql+psycopg://postgres:mypassword@localhost:5555/postgres'))
 
 
 def run_sql(query: str) -> dict:

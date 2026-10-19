@@ -1,4 +1,10 @@
-from flask import Flask, request, render_template_string
+import os
+import re
+import json
+import urllib.request
+import urllib.error
+
+from flask import Flask, request, render_template_string, jsonify
 import pandas as pd
 from sqlalchemy import create_engine
 from sklearn.model_selection import train_test_split
@@ -6,8 +12,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
-import os
 engine = create_engine(os.environ.get('DATABASE_URL', 'postgresql://postgres:mypassword@localhost:5555/postgres'))
+ADK_URL = os.environ.get('ADK_URL', 'http://127.0.0.1:8000')
 
 # --- Delay model (trained once, when the app starts) ---
 df = pd.read_sql('SELECT * FROM flights_processed', engine)
@@ -79,6 +85,18 @@ def chance_of_yes(model, row, base_rate):
     return odds / (1 + odds) * 100
 
 
+# --- Talking to the ADK chatbot ---
+def adk_post(path, payload, timeout=90):
+    req = urllib.request.Request(
+        ADK_URL + path,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
 # --- The web page ---
 PAGE = """
 <!DOCTYPE html>
@@ -88,7 +106,6 @@ PAGE = """
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flight Delay Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<link href="https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css" rel="stylesheet" />
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Segoe UI', Arial, sans-serif; background: #f1f5f9; margin: 0; color: #0f172a; }
@@ -124,14 +141,18 @@ PAGE = """
   .bad { background: #fee2e2; color: #b91c1c; }
   .good { background: #dcfce7; color: #15803d; }
   .error { background: #fef3c7; color: #92400e; }
-  .note { font-size: 12px; color: #64748b; margin-top: 12px; line-height: 1.5; }
 
   .chat-panel { position: sticky; top: 24px; height: calc(100vh - 48px); display: flex; flex-direction: column; background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(15,23,42,0.08); overflow: hidden; }
   .chat-title { padding: 18px 22px; border-bottom: 1px solid #e2e8f0; font-weight: 600; font-size: 16px; }
   .chat-title span { display: block; font-weight: 400; font-size: 12px; color: #64748b; margin-top: 2px; }
-  #n8n-chat { flex: 1; min-height: 0; --chat--color-primary: #2563eb; --chat--color-primary-shade-50: #1d4ed8; --chat--color-primary-shade-100: #1e40af; --chat--border-radius: 10px; --chat--spacing: 0.9rem; }
-  #n8n-chat .chat-layout { height: 100%; }
-  #n8n-chat .chat-header { display: none; }
+  #chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 88%; padding: 10px 12px; border-radius: 10px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: #2563eb; color: white; }
+  .msg.bot { align-self: flex-start; background: #f1f5f9; color: #0f172a; }
+  #chat-form { display: flex; gap: 8px; padding: 14px; border-top: 1px solid #e2e8f0; }
+  #chat-input { flex: 1; margin-top: 0; }
+  #chat-send { padding: 0 18px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  #chat-send:hover { background: #1d4ed8; }
 
   @media (max-width: 1100px) {
     .layout { grid-template-columns: 1fr; padding: 20px; }
@@ -180,7 +201,6 @@ PAGE = """
                 <label>Day of week (0=Mon, 6=Sun)</label>
                 <input name="day_of_week" value="0">
               </div>
-              
               <div>
                 <label>Distance (miles)</label>
                 <input name="distance" value="500">
@@ -222,7 +242,11 @@ PAGE = """
 
     <div class="chat-panel">
       <div class="chat-title">Ask about the flight data<span>Answers come straight from the database</span></div>
-      <div id="n8n-chat"></div>
+      <div id="chat-log"></div>
+      <form id="chat-form">
+        <input id="chat-input" type="text" placeholder="Ask a question about the flights..." autocomplete="off">
+        <button id="chat-send" type="submit">Send</button>
+      </form>
     </div>
 
   </div>
@@ -247,28 +271,76 @@ PAGE = """
   });
 </script>
 
-<script type="module">
-  import { createChat } from 'https://cdn.jsdelivr.net/npm/@n8n/chat/dist/chat.bundle.es.js';
-  createChat({
-    webhookUrl: 'http://localhost:5678/webhook/9de7b9f0-2472-40e6-b861-ed75c109126b/chat',
-    target: '#n8n-chat',
-    mode: 'fullscreen',
-    showWelcomeScreen: false,
-    initialMessages: ['Ask me anything about the January 2024 flight data.'],
-    i18n: {
-      en: {
-        title: '',
-        subtitle: '',
-        footer: '',
-        getStarted: 'New conversation',
-        inputPlaceholder: 'Ask a question about the flights...'
-      }
+<script>
+  const sessionId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + String(Math.random()).slice(2);
+  const log = document.getElementById('chat-log');
+
+  function addMessage(text, who) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + who;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  addMessage('Ask me anything about the January 2024 flight data.', 'bot');
+
+  document.getElementById('chat-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    addMessage(text, 'user');
+    const waiting = addMessage('Thinking...', 'bot');
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, session: sessionId })
+      });
+      const data = await res.json();
+      waiting.textContent = data.reply;
+    } catch (err) {
+      waiting.textContent = 'Could not reach the server.';
     }
+    log.scrollTop = log.scrollHeight;
   });
 </script>
 </body>
 </html>
 """
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    session = (data.get('session') or '').strip()
+    if not message or not re.fullmatch(r'[A-Za-z0-9-]{8,64}', session):
+        return jsonify({'reply': 'Please type a question.'}), 400
+    try:
+        try:
+            adk_post(f'/apps/flight_agent/users/web/sessions/{session}', {})
+        except urllib.error.HTTPError:
+            pass  # the session already exists
+        events = adk_post('/run', {
+            'appName': 'flight_agent',
+            'userId': 'web',
+            'sessionId': session,
+            'newMessage': {'role': 'user', 'parts': [{'text': message}]},
+        })
+        texts = []
+        for event in events:
+            content = event.get('content') or {}
+            for part in content.get('parts') or []:
+                if part.get('text') and not part.get('thought'):
+                    texts.append(part['text'].strip())
+        reply = '\n\n'.join(texts) or 'I could not find an answer.'
+        return jsonify({'reply': reply})
+    except Exception as e:
+        return jsonify({'reply': f'The chatbot is not reachable right now ({e}).'}), 502
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -322,4 +394,4 @@ def home():
 
 
 if __name__ == "__main__":
-        app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=False)

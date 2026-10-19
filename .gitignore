@@ -5,3 +5,5 @@ __pycache__/
 .env
 .adk/
 task-def.json
+
+task-def-adk.json
