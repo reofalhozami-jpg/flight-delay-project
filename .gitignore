@@ -7,3 +7,5 @@ __pycache__/
 task-def.json
 
 task-def-adk.json
+
+n8n-backup/
