@@ -1,0 +1,8 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["ssm:GetParameters"],
+    "Resource": "arn:aws:ssm:eu-north-1:615226193649:parameter/flight/google-api-key"
+  }]
+}
