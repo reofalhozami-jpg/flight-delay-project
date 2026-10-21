@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16
+    profiles: ["db"]
+    container_name: flight-postgres
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-mypassword}
+    ports:
+      - "5555:5432"
+    volumes:
+      - flight-pgdata:/var/lib/postgresql/data
+    networks:
+      - flight-net
+
+  adk:
+    build:
+      context: .
+      dockerfile: Dockerfile.adk
+    env_file: flight_agent/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${DB_PASSWORD:-mypassword}@flight-postgres:5432/postgres
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - flight-net
+
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-mypassword}@flight-postgres:5432/postgres
+      ADK_URL: http://adk:8000
+    ports:
+      - "5000:5000"
+    depends_on:
+      - adk
+    restart: unless-stopped
+    networks:
+      - flight-net
+
+networks:
+  flight-net:
+    external: true
+
+volumes:
+  flight-pgdata:
